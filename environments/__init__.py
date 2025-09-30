@@ -1,5 +1,5 @@
 from gymnasium.envs.registration import register
-from environment.windygrid import WindyGridEnv
+from environments.windygrid import WindyGridEnv
 
 register(
     id="environment/WindyGrid-v0",

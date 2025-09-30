@@ -5,9 +5,9 @@ import gymnasium as gym
 from gymnasium.vector import SyncVectorEnv
 import minari
 from config import Args
-from model.diffusion import DiffusionPolicy
-from model.model import UNet
-from train import create_train_state, make_train_step
+from algorithms.diffusion import DiffusionPolicy
+from model.unet import UNet
+from train.train import create_train_state, make_train_step
 from collections import namedtuple
 
 

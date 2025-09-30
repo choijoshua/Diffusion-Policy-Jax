@@ -9,9 +9,8 @@ parent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, parent_dir)
 
 from config import Args
-from model.model import UNet
-from util import cosine_beta_schedule
-
+from model.unet import UNet
+from model.util import cosine_beta_schedule
 
 
 class DDPMPolicy:
@@ -75,13 +74,4 @@ class DDPMPolicy:
     def get_action(self, xt, agent_state, obs):
         trajectory_pred = self.sample(xt, agent_state, obs)
         return trajectory_pred[:, 0, :]
-
-
-rng = jax.random.PRNGKey(seed=42)
-args = Args()
-model = UNet(args, 30, 17)
-policy = DDPMPolicy(args, model, 100)
-
-x0 = jax.random.uniform(key=rng, shape=(32, 50, 17))
-t = jnp.array([5] * 32)
-print(policy.sample(x0))
+    

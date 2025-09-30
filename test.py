@@ -1,5 +1,5 @@
 import gymnasium as gym
-import environment 
+import environments 
 import numpy as np
 from stable_baselines3 import PPO
 

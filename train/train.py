@@ -15,7 +15,7 @@ def create_train_state(args, rng, network, dummy_input, steps=None):
         tx=optax.adam(lr, eps=1e-5),
     )
 
-def make_train_step(self, forward_sample_fn, noise_pred_fn):
+def make_train_step(args, forward_sample_fn, noise_pred_fn):
     """Make JIT-compatible agent train step, with optional model-based rollouts."""
 
     def _train_step(runner_state, batch_x0):
@@ -26,7 +26,7 @@ def make_train_step(self, forward_sample_fn, noise_pred_fn):
 
         # 2) sample a random timestep for each element in the batch
         B = batch_x0.shape[0]
-        t = jax.random.randint(t_rng, (B,), 0, self.timesteps)
+        t = jax.random.randint(t_rng, (B,), 0, args.timesteps)
 
         # 3) sample the forward noise and build x_t
         noise = jax.random.normal(noise_rng, batch_x0.shape)
@@ -50,5 +50,3 @@ def make_train_step(self, forward_sample_fn, noise_pred_fn):
 
     # JIT it once so you get maximum performance
     return _train_step
-
-

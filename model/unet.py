@@ -2,7 +2,7 @@ import jax
 import jax.numpy as jnp
 import flax.linen as nn
 from config import Args
-from util import pos_embedding
+from model.util import pos_embedding
 
 
 class TimeEmbedding(nn.Module):
