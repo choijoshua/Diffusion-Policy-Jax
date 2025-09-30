@@ -8,16 +8,15 @@ import os
 parent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, parent_dir)
 
-from config import Args
+from config import TrainArgs
 from model.unet import UNet
 
 
-
 class ScoreMatchingPolicy:
-    def __init__(self, args: Args, model: UNet, timesteps: int):
+    def __init__(self, args: TrainArgs, model: UNet):
         self.args = args
+        self.timesteps = args.timesteps
         self.model = model
-        self.rng = jax.random.PRNGKey(seed=self.args.seed)
         
     def sde_gt(self, t):
         '''
@@ -41,7 +40,7 @@ class ScoreMatchingPolicy:
         var = self.forward_sde_variance(t, sigma)
         return x0 + var*noise
     
-    def euler_maruyama_sampler(self, rng, init_x, params, num_steps, eps):
+    def euler_maruyama_sampler(self, rng, init_x, params, num_steps, eps=1e-4):
         '''Generate samples from score-based models with the Euler-Maruyama solver.
 
         Args:
@@ -60,7 +59,7 @@ class ScoreMatchingPolicy:
         x = init_x
         time_steps = jnp.linspace(1., eps, num_steps)
         step_size = time_steps[0] - time_steps[1]
-        for time_step in range(time_steps):
+        for time_step in time_steps:
             batch_time_step = jnp.ones(self.args.batch_size) * time_step
             g = self.sde_gt(time_step)
             mean_x = x + (g**2) * self.model.apply_fn(
@@ -117,7 +116,7 @@ class ScoreMatchingPolicy:
         # The last step does not include any noise
         return x_mean
     
-    def sample(self, xt, agent_state):
+    def sample(self, rng, xt, agent_state):
         ''' Sample from target distribution based on which sampler to use
         
         Sampler Options:
@@ -129,24 +128,15 @@ class ScoreMatchingPolicy:
         '''
         params = agent_state.params
         if self.args.sampler == "euler_maruyama":
-            x_0 = self.euler_maruyama_sampler(rng, xt, params, t, self.args.sampler_timestep)
+            x_0 = self.euler_maruyama_sampler(rng, xt, params, self.timesteps)
         elif self.args.sampler == "predictor_corrector":
-            x_0 = self.predictor_corrector_sampler(rng, xt, params, t, self.args.sampler_timestep)
+            x_0 = self.predictor_corrector_sampler(rng, xt, params, self.timesteps)
         else:
             print("PICK AN EXISTING SAMPLER: \n EULER MARUYAMA \n PREDICTOR CORRECTOR")    
         
         return x_0
     
-    def get_action(self, xt, agent_state, obs):
-        trajectory_pred = self.sample(xt, agent_state, obs)
+    def get_action(self, rng, xt, agent_state, obs):
+        trajectory_pred = self.sample(xt, rng, agent_state, obs)
         return trajectory_pred[:, 0, :]
 
-
-rng = jax.random.PRNGKey(seed=42)
-args = Args()
-model = UNet(args, 30, 17)
-policy = ScoreMatchingPolicy(args, model, 100)
-
-x0 = jax.random.uniform(key=rng, shape=(32, 50, 17))
-t = jnp.array([5] * 32)
-print(policy.sample(x0, ))

@@ -8,20 +8,19 @@ import os
 parent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, parent_dir)
 
-from config import Args
+from config import TrainArgs
 from model.unet import UNet
 from model.util import cosine_beta_schedule
 
 
 class DDPMPolicy:
-    def __init__(self, args: Args, model: UNet, timesteps: int):
+    def __init__(self, args: TrainArgs, model: UNet):
         self.args = args
         self.model = model
-        self.timesteps = timesteps
-        self.beta = cosine_beta_schedule(timesteps=timesteps)
+        self.timesteps = self.args.num_timesteps
+        self.beta = cosine_beta_schedule(timesteps=self.timesteps)
         self.alpha = 1 - self.beta
         self.alpha_bar = jnp.cumprod(self.alpha)
-        self.rng = jax.random.PRNGKey(seed=self.args.seed)
         
     def q_mean_variance(self, x0, t):
         '''
@@ -53,16 +52,16 @@ class DDPMPolicy:
 
     def p_sample(self, xt, t, epsilon_pred, noise):
         '''
-        Sample from q(x_{t-1} | x_t, x_0)
+        Sample from q(x_{t-1} | x_t)
         '''
         assert noise.shape == xt.shape
         mean, var = self.p_mean_variance(xt, t, epsilon_pred)
         return mean + var * noise
     
-    def sample(self, xt, agent_state):
+    def sample(self, rng, xt, agent_state):
         params = agent_state.params
         for t in reversed(range(self.timesteps)):
-            rng, epsilon_rng = jax.random.split(self.rng)
+            rng, epsilon_rng = jax.random.split(rng)
             epsilon = self.model.apply(params, xt, t)
             noise = jax.random.normal(key=epsilon_rng, shape=xt.shape)
             if t == 0:
@@ -71,7 +70,7 @@ class DDPMPolicy:
         
         return xt
     
-    def get_action(self, xt, agent_state, obs):
-        trajectory_pred = self.sample(xt, agent_state, obs)
+    def get_action(self, rng, xt, agent_state, obs):
+        trajectory_pred = self.sample(xt, rng, agent_state, obs)
         return trajectory_pred[:, 0, :]
     
