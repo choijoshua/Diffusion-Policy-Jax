@@ -18,10 +18,10 @@ class ObservationEmbedding(nn.Module):
     embed_dim: int
     @nn.compact
     def __call__(self, obs):
-        t = nn.Dense(features=self.embed_dim*4)(obs)
-        t = nn.swish(t)
-        t = nn.Dense(features=self.embed_dim)(obs)
-        return t
+        obs = nn.Dense(features=self.embed_dim*4)(obs)
+        obs = nn.swish(obs)
+        obs = nn.Dense(features=self.embed_dim)(obs)
+        return obs
     
 class Conv1dBlock(nn.Module):
     features: int
@@ -49,12 +49,12 @@ class ResidualBlock(nn.Module):
             x: [batch, horizon, out_channels]
         '''
         t = nn.Dense(self.out_channels)(nn.swish(t))
-        out = Conv1dBlock(features=self.out_channels, kernel_size=self.kernel_size)(x)
+        x = Conv1dBlock(features=self.out_channels, kernel_size=self.kernel_size)(x)
         t = jnp.expand_dims(t, axis=1)
-        out += t
-        out = Conv1dBlock(features=self.out_channels, kernel_size=self.kernel_size)(x)
+        x += t
+        x = Conv1dBlock(features=self.out_channels, kernel_size=self.kernel_size)(x)
         residual = nn.Conv(self.out_channels, kernel_size=(self.kernel_size,))(x)
-        return out + residual
+        return x + residual
     
 # Kernel size = 3, Stride = 2, Padding = 1
 class DownSample(nn.Module):
@@ -83,7 +83,9 @@ class UNet(nn.Module):
 
     @nn.compact
     def __call__(self, x, t, obs):
+        
         t = pos_embedding(t, self.args.embed_dim)
+        
         time_embed = TimeEmbedding(self.args.embed_dim)(t)
         obs_embed = ObservationEmbedding(self.args.embed_dim)(obs)
 

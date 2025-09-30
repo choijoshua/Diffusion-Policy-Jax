@@ -5,8 +5,8 @@ import gymnasium as gym
 from gymnasium.vector import SyncVectorEnv
 import minari
 from config import Args
-from diffusion import DiffusionPolicy
-from model import UNet
+from model.diffusion import DiffusionPolicy
+from model.model import UNet
 from train import create_train_state, make_train_step
 from collections import namedtuple
 

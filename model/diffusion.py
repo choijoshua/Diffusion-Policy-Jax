@@ -1,13 +1,20 @@
 import jax
 import jax.numpy as jnp
 import flax.linen as nn
+import sys
+import os
+
+# Add parent directory to path
+parent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, parent_dir)
+
 from config import Args
-from model import UNet
+from model.model import UNet
 from util import cosine_beta_schedule
 
 
 
-class DiffusionPolicy:
+class DDPMPolicy:
     def __init__(self, args: Args, model: UNet, timesteps: int):
         self.args = args
         self.model = model
@@ -53,11 +60,11 @@ class DiffusionPolicy:
         mean, var = self.p_mean_variance(xt, t, epsilon_pred)
         return mean + var * noise
     
-    def sample(self, xt, agent_state, obs):
+    def sample(self, xt, agent_state):
         params = agent_state.params
         for t in reversed(range(self.timesteps)):
             rng, epsilon_rng = jax.random.split(self.rng)
-            epsilon = self.model.apply(params, xt, t, obs)
+            epsilon = self.model.apply(params, xt, t)
             noise = jax.random.normal(key=epsilon_rng, shape=xt.shape)
             if t == 0:
                 noise = jnp.zeros_like(xt)
@@ -73,7 +80,7 @@ class DiffusionPolicy:
 rng = jax.random.PRNGKey(seed=42)
 args = Args()
 model = UNet(args, 30, 17)
-policy = DiffusionPolicy(args, model, 100)
+policy = DDPMPolicy(args, model, 100)
 
 x0 = jax.random.uniform(key=rng, shape=(32, 50, 17))
 t = jnp.array([5] * 32)

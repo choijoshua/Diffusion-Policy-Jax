@@ -10,6 +10,9 @@ def pos_embedding(t, dim):
     emb = jnp.concatenate([jnp.sin(emb), jnp.cos(emb)], axis=1)
     return emb
 
+def gaussian_fourier_proj(rng, t, dim, scale):
+    w = jax.random.normal(rng, (dim,))
+
 def cosine_beta_schedule(timesteps, s=0.008, dtype=jnp.float32):
     """
     cosine schedule
