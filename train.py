@@ -5,23 +5,27 @@ import optax
 from flax.training.train_state import TrainState
 import hydra
 from hydra.core.config_store import ConfigStore
+from omegaconf import OmegaConf
 import sys
+import os
 from pathlib import Path
 import pickle
 import warnings
 import wandb
+from tqdm import tqdm
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
 from dataprocessing.utils import make_env_and_dataset, build_transition_from_raw, Transition
 from dataprocessing.dataset import TrajDataset
-from config import GeneralArgs, TrainArgs, register_train_configs
+from config import GeneralArgs, register_train_configs
 from algorithms.ddpm import DDPMPolicy
 from algorithms.score_matching import ScoreMatchingPolicy
 from model.unet import UNet
-from collections import namedtuple
 
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'  # Reduce logging
+os.environ['XLA_FLAGS'] = '--xla_gpu_deterministic_ops=true'
 
 def create_train_state(args, rng, network, dummy_input, steps=None):
     lr = optax.cosine_decay_schedule(args.lr, steps or args.num_updates)
@@ -31,7 +35,7 @@ def create_train_state(args, rng, network, dummy_input, steps=None):
         tx=optax.adam(lr, eps=1e-5),
     )
 
-def make_train_step(args, dataset):
+def make_train_step(args, dataset, policy):
     """
     Create train step that samples from TrajDataset with deterministic RNG.
     
@@ -41,19 +45,18 @@ def make_train_step(args, dataset):
     """
     
     def _train_step(runner_state, _):
-        rng, policy = runner_state
+        rng, train_state = runner_state
 
         # Define loss function
-        def ddpm_loss_fn(params):
+        def ddpm_loss_fn(params, x_t, t, batch_obs):
             eps_pred = policy.predict(params, x_t, t, batch_obs)
             loss = jnp.mean((noise - eps_pred) ** 2)
             return loss
         
-        def score_matching_loss_fn(params):
+        def score_matching_loss_fn(params, x_t, t, batch_obs):
             score_pred = policy.predict(params, x_t, t, batch_obs)
             std = policy.forward_sde_variance(t)
-            loss = jnp.mean(jnp.sum((score_pred * std[:, None, None] + noise)**2, 
-                          axis=(1,2,3)))
+            loss = jnp.mean((score_pred * std[:, None, None] + noise)**2)
             return loss
         
         # 1) Split RNG for different operations
@@ -75,11 +78,11 @@ def make_train_step(args, dataset):
             batch_obs = obs_batch[:, 0, :]  # Condition on initial observation
 
         # 3) Sample diffusion timesteps
-        if args.algorithms == "ddpm":
+        if args.algorithm == "ddpm":
             t = jax.random.randint(t_rng, (args.batch_size,), 0, args.num_timesteps)
             loss_fn = ddpm_loss_fn
-        elif args.algorithms == "score_matching":
-            t = jax.random.randint(t_rng, (args.batch_size,), args.eps, 1.0)
+        elif args.algorithm == "score_matching":
+            t = jax.random.uniform(t_rng, (args.batch_size,), args.eps, 1.0)
             loss_fn = score_matching_loss_fn
         else:
             print("CHOOSE AN ALGORITHM TO USE (DDPM, SCOREMATCHING)")
@@ -90,21 +93,22 @@ def make_train_step(args, dataset):
         x_t = policy.forward_sample(batch_x0, t, noise)
         
         # 6) Compute gradients and update
-        loss, grads = jax.value_and_grad(loss_fn)(policy.model.params)
-        policy.model = policy.model.apply_gradients(grads=grads)
+        loss, grads = jax.value_and_grad(loss_fn)(train_state.params, x_t, t, batch_obs)
+        new_train_state = train_state.apply_gradients(grads=grads)
         
         # 7) Return new state and metrics
-        new_runner_state = (rng, policy)
+        new_runner_state = (rng, new_train_state)
         metrics = {'loss': loss}
         return new_runner_state, metrics
     
-    return jax.jit(_train_step)
+    return _train_step
 
 def evaluate_policy_returns(
     cfg, 
     rng, 
     env, 
     policy, 
+    train_state, 
     env_meta=None):
     args = cfg.algorithms
     if env_meta is None:
@@ -162,30 +166,31 @@ cs = ConfigStore.instance()
 register_train_configs()
 cs.store(name="base_config", node=GeneralArgs)
 
-@hydra.main(version_base=None, config_path="../main_conf", config_name="base_config")
+@hydra.main(version_base=None, config_path="config", config_name="base_config")
 def main(cfg: GeneralArgs) -> None:
     train_args = cfg.algorithms
     print(cfg)
     rng = jax.random.PRNGKey(cfg.seed)
 
     if cfg.log:
+        # wandb.finish()
         wandb.init(
-            config=train_args,
-            project=cfg.wandb_project,
-            # entity=args.wandb_team,
-            group=cfg.wandb_group,
-            job_type=cfg.wandb_jobtype,
+                    config=OmegaConf.to_container(train_args, resolve=True),
+                    project=cfg.wandb_project,
+                    # entity=args.wandb_team,
+                    group=cfg.wandb_group,
+                    job_type=cfg.wandb_jobtype,
         )
 
     # --- Initialize environment and dataset ---
     env, raw_dataset, env_meta = make_env_and_dataset(cfg, train_args.eval_workers)
     dataset = build_transition_from_raw(raw_dataset, train_args.gamma)
 
-    obs_dim = env.observation_space.shape[0]
-    action_dim = env.action_space.shape[0]
+    obs_dim = env.single_observation_space.shape[0]
+    action_dim = env.single_action_space.shape[0]
     
     print(f"Observation dim: {obs_dim}, Action dim: {action_dim}")
-    print(f"Dataset size: {len(dataset['obs'])}")   
+    print(f"Dataset size: {len(dataset.obs)}")   
 
     # --- Create TrajDataset from Transition namedtuple ---
     print("\nCreating trajectory dataset...")
@@ -215,11 +220,11 @@ def main(cfg: GeneralArgs) -> None:
 
     if train_args.algorithm == "ddpm":
         policy = DDPMPolicy(
-            train_args, policy_train_state, action_dim
+            train_args, action_dim, policy_train_state.apply_fn
         )
     elif train_args.algorithm == "score_matching":
         policy = ScoreMatchingPolicy(
-            train_args, policy_train_state, action_dim
+            train_args, action_dim, policy_train_state.apply_fn
         )
     else: 
         print("CHOOSE AN ALGORITHM TO USE")
@@ -227,19 +232,21 @@ def main(cfg: GeneralArgs) -> None:
     
     _agent_train_step_fn = make_train_step(
         train_args,
-        dataset
+        traj_dataset,
+        policy
     )
     
     num_evals = train_args.num_updates // train_args.eval_interval
-    best_score = -onp.inf
-    for eval_idx in range(num_evals):
+    for eval_idx in tqdm(range(num_evals), desc="Training"):
         # --- Execute train loop ---
-        (rng, policy), loss = jax.lax.scan(
-            _agent_train_step_fn,
-            (rng, policy),
-            None,
-            train_args.eval_interval,
-        )
+        # (rng, policy_train_state), loss = jax.lax.scan(
+        #     _agent_train_step_fn,
+        #     (rng, policy_train_state),
+        #     None,
+        #     train_args.eval_interval,
+        # )
+        for i in range(train_args.eval_interval):
+            (rng, policy_train_state), loss = _agent_train_step_fn((rng, policy_train_state), i)
 
         # --- Evaluate agent ---
         rng, rng_eval = jax.random.split(rng)
@@ -250,9 +257,8 @@ def main(cfg: GeneralArgs) -> None:
             log_dict = {
                 "score": scores.mean(),
                 "score_std": scores.std(),
-                "num_updates": step,
-                **{k: loss[k][-1] for k in loss},
             }
             wandb.log(log_dict)
 
-        
+if __name__=="__main__":
+    main()

@@ -27,7 +27,20 @@ class DDPMPolicy:
         '''
         q(x_t | x_0) = N(mean, var)
         '''
-        mean = jnp.sqrt(self.alpha_bar[t]) * x0 
+
+        # Get alpha_bar values for each timestep
+        alpha_bar_t = self.alpha_bar[t]  # (B,)
+
+        if len(x0.shape) == 2:
+            # Single-step: (B, D)
+            alpha_bar_t = alpha_bar_t[:, None]  # (B, 1)
+        elif len(x0.shape) == 3:
+            # Trajectory: (B, H, D)
+            alpha_bar_t = alpha_bar_t[:, None, None]  # (B, 1, 1)
+        else:
+            raise ValueError(f"Unsupported x0 shape: {x0.shape}")
+        
+        mean = jnp.sqrt(alpha_bar_t) * x0 
         var = jnp.sqrt(1 - self.alpha_bar[t])
         return mean, var
 
@@ -38,7 +51,7 @@ class DDPMPolicy:
         assert noise.shape == x0.shape
         mean, var = self.q_mean_variance(x0, t)
 
-        return mean + var * noise
+        return mean + var[:, None, None] * noise
     
     def p_mean_variance(self, xt, t, epsilon_pred):
         '''

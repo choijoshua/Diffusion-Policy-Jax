@@ -38,7 +38,7 @@ class ScoreMatchingPolicy:
         Sample from x(t) = N(x(0), var)
         '''
         var = self.forward_sde_variance(t)
-        return x0 + var*noise
+        return x0 + var[:, None, None]*noise
     
     def euler_maruyama_sampler(self, rng, init_x, obs, params, num_steps, eps=1e-4):
         '''Generate samples from score-based models with the Euler-Maruyama solver.
