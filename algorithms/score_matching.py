@@ -25,26 +25,27 @@ class ScoreMatchingPolicy:
         '''
         return self.args.sigma ** t
         
-    def forward_sde_variance(self, t, sigma, num_steps, eps):
+    def forward_sde_variance(self, t):
         '''
         SDE in the form of: dx = f(x, t) dt + g(t) dw
         x(t) = x(0) + integral [0, t] g(t)^2 dw
         '''
         
-        return jnp.sqrt((sigma**(2 * t) - 1.) / 2. / jnp.log(sigma))
+        return jnp.sqrt((self.args.sigma**(2 * t) - 1.) / 2. / jnp.log(self.args.sigma))
         
-    def forward_sde_sample(self, x0, t, sigma, noise):
+    def forward_sde_sample(self, x0, t, noise):
         '''
         Sample from x(t) = N(x(0), var)
         '''
-        var = self.forward_sde_variance(t, sigma)
+        var = self.forward_sde_variance(t)
         return x0 + var*noise
     
-    def euler_maruyama_sampler(self, rng, init_x, params, num_steps, eps=1e-4):
+    def euler_maruyama_sampler(self, rng, init_x, obs, params, num_steps, eps=1e-4):
         '''Generate samples from score-based models with the Euler-Maruyama solver.
 
         Args:
             init_x: initial x sampled from random distribution
+            obs: observation condition
             params: A dictionary that contains the model parameters.
             diffusion_coeff: A function that gives the diffusion coefficient of the SDE.
             num_steps: The number of sampling steps. 
@@ -62,20 +63,19 @@ class ScoreMatchingPolicy:
         for time_step in time_steps:
             batch_time_step = jnp.ones(self.args.batch_size) * time_step
             g = self.sde_gt(time_step)
-            mean_x = x + (g**2) * self.model.apply_fn(
-                                                params,
-                                                x, 
-                                                batch_time_step) * step_size
+            mean_x = x + (g**2) * self.predict(params, x, batch_time_step, obs) * step_size
             rng, step_rng = jax.random.split(rng)
             x = mean_x + jnp.sqrt(step_size) * g * jax.random.normal(step_rng, x.shape)      
         # Do not include any noise in the last sampling step.
         return mean_x
     
-    def predictor_corrector_sampler(self, rng, init_x, params, num_steps, eps, snr=0.16):
+    def predictor_corrector_sampler(self, rng, init_x, obs, params, num_steps, eps=1e-5, snr=0.16):
         '''Generate samples from score-based models with the Predictor Corrector solver.
 
         Args:
+            rng: 
             init_x: initial x sampled from random distribution
+            obs: observation condition
             params: A dictionary that contains the model parameters.
             num_steps: The number of sampling steps. 
             Equivalent to the number of discretized time steps.    
@@ -96,7 +96,7 @@ class ScoreMatchingPolicy:
             batch_time_step = jnp.ones(self.args.batch_size) * time_step
             
             # Corrector step (Langevin MCMC)
-            grad = self.model.apply_fn(params, x, batch_time_step)    
+            grad = self.predict(params, x, batch_time_step, obs)    
             grad_norm = jnp.linalg.norm(grad.reshape(x.shape[0], x.shape[1], -1),
                                         axis=-1).mean()
             noise_norm = jnp.sqrt(jnp.prod(jnp.array(x.shape[1:])))  # Fixed: wrap in jnp.array
@@ -107,7 +107,7 @@ class ScoreMatchingPolicy:
 
             # Predictor step (Euler-Maruyama)
             g = self.sde_gt(time_step)
-            score = self.model.apply_fn(params, x, batch_time_step)
+            score = self.predict(params, x, batch_time_step, obs)
             x_mean = x + (g**2) * score * step_size
             rng, step_rng = jax.random.split(rng)
             z = jax.random.normal(step_rng, x.shape)
@@ -116,7 +116,14 @@ class ScoreMatchingPolicy:
         # The last step does not include any noise
         return x_mean
     
-    def sample(self, rng, xt, agent_state):
+    def forward_sample(self, x0, t, noise):
+        """ 
+        keep function name identical with other methods for forward diffusion
+        
+        """
+        return self.forward_sde_sample(x0, t, noise)
+    
+    def sample(self, rng, xt, agent_state, obs):
         ''' Sample from target distribution based on which sampler to use
         
         Sampler Options:
@@ -128,13 +135,16 @@ class ScoreMatchingPolicy:
         '''
         params = agent_state.params
         if self.args.sampler == "euler_maruyama":
-            x_0 = self.euler_maruyama_sampler(rng, xt, params, self.timesteps)
+            x_0 = self.euler_maruyama_sampler(rng, xt, obs, params, self.timesteps, self.args.eps)
         elif self.args.sampler == "predictor_corrector":
-            x_0 = self.predictor_corrector_sampler(rng, xt, params, self.timesteps)
+            x_0 = self.predictor_corrector_sampler(rng, xt, obs, params, self.timesteps, self.args.eps)
         else:
             print("PICK AN EXISTING SAMPLER: \n EULER MARUYAMA \n PREDICTOR CORRECTOR")    
         
         return x_0
+    
+    def predict(self, params, x, t, obs):
+        return self.model.apply_fn(params, x, t, obs)
     
     def get_action(self, rng, xt, agent_state, obs):
         trajectory_pred = self.sample(xt, rng, agent_state, obs)

@@ -58,17 +58,27 @@ class DDPMPolicy:
         mean, var = self.p_mean_variance(xt, t, epsilon_pred)
         return mean + var * noise
     
-    def sample(self, rng, xt, agent_state):
+    def forward_sample(self, x0, t, noise):
+        """ 
+        keep function name identical with other methods for forward diffusion
+
+        """
+        return self.q_sample(x0, t, noise)
+    
+    def sample(self, rng, xt, agent_state, obs):
         params = agent_state.params
         for t in reversed(range(self.timesteps)):
             rng, epsilon_rng = jax.random.split(rng)
-            epsilon = self.model.apply(params, xt, t)
+            epsilon = self.model.apply_fn(params, xt, t, obs)
             noise = jax.random.normal(key=epsilon_rng, shape=xt.shape)
             if t == 0:
                 noise = jnp.zeros_like(xt)
             xt = self.p_sample(xt, t, epsilon, noise)
         
         return xt
+    
+    def predict(self, params, xt, t, obs):
+        return self.model.apply_fn(params, xt, t, obs)
     
     def get_action(self, rng, xt, agent_state, obs):
         trajectory_pred = self.sample(xt, rng, agent_state, obs)
