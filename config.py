@@ -2,6 +2,7 @@ from dataclasses import dataclass
 from omegaconf import MISSING
 from hydra.core.config_store import ConfigStore
 from typing import Optional
+from typing import Sequence
 
 @dataclass
 class TrainArgs:
@@ -12,6 +13,13 @@ class TrainArgs:
     
     num_timesteps: int = 50
     mode: str = "trajectory"
+    horizon: int = 64
+    max_traj_len: int = 1000
+    max_n_traj: int = 1000
+
+    # Model Parameters
+    embed_dim: int = 256
+    dims: Sequence[int] = (128, 256, 512)
 
 @dataclass
 class DDPMArgs(TrainArgs):
