@@ -9,12 +9,12 @@ parent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, parent_dir)
 
 from config import TrainArgs
-from model.unet import UNet
 from model.util import cosine_beta_schedule
+from flax.training.train_state import TrainState
 
 
 class DDPMPolicy:
-    def __init__(self, args: TrainArgs, model: UNet):
+    def __init__(self, args: TrainArgs, model: TrainState):
         self.args = args
         self.model = model
         self.timesteps = self.args.num_timesteps

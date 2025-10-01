@@ -1,11 +1,18 @@
 import jax
 import jax.numpy as jnp
-import tyro
-import gymnasium as gym
-from gymnasium.vector import SyncVectorEnv
-import minari
-from config import Args
-from algorithms.diffusion import DiffusionPolicy
+import hydra
+from hydra.core.config_store import ConfigStore
+import sys
+from pathlib import Path
+import pickle
+
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(PROJECT_ROOT))
+
+from dataprocessing.utils import make_env_and_dataset, build_transition_from_raw
+import environments
+from config import GeneralArgs, TrainArgs, register_train_configs
+from algorithms.ddpm import DDPMPolicy
 from model.unet import UNet
 from train.train import create_train_state, make_train_step
 from collections import namedtuple
@@ -13,40 +20,19 @@ from collections import namedtuple
 
 Transition = namedtuple("Transition", "obs action reward next_obs next_action done traj_return label")
 
+cs = ConfigStore.instance()
+register_train_configs()
+cs.store(name="base_config", node=GeneralArgs)
 
-if __name__=="__main__":
-    args = tyro.cli(Args)
-    rng = jax.random.PRNGKey(args.seed)
-    raw_dataset = minari.load_dataset(args.dataset, download=True)
+@hydra.main(version_base=None, config_path="../main_conf", config_name="base_config")
+def main(cfg: GeneralArgs) -> None:
+    train_args = cfg.algorithms
+    print(cfg)
+    rng = jax.random.PRNGKey(cfg.seed)
 
-    def make_env():
-        return raw_dataset.recover_environment()
+    # --- Initialize environment and dataset ---
+    env, raw_dataset, env_meta = make_env_and_dataset(cfg, train_args.eval_workers)
+    dataset = build_transition_from_raw(raw_dataset, train_args.gamma)
 
-    num_envs = 8
-    env_fns  = [make_env for _ in range(num_envs)]
 
-    env = SyncVectorEnv(env_fns)
-
-    dataset_list = []
-    for episode in raw_dataset:
-        episode_data = Transition(
-                obs=jnp.array(episode.observations[:-1]),
-                action=jnp.array(episode.actions),
-                reward=jnp.array(episode.rewards),
-                next_obs=jnp.array(episode.observations[1:]),
-                next_action=jnp.roll(episode.actions, -1, axis=0),
-                done=jnp.logical_or(jnp.array(episode.truncations), jnp.array(episode.terminations)),
-                traj_return=jnp.zeros_like(jnp.array(episode.truncations)),
-                label=jnp.zeros_like(jnp.array(episode.truncations))
-        )
-        dataset_list.append(episode_data)
-
-    # dataset = jax.tree_map(lambda *arrays: jnp.concatenate(arrays, axis=0), *dataset_list)
-    act_dim = env.single_action_space.shape[0]
-    obs_dim = env.single_observation_space.shape[0]
-    dummy_obs = jnp.zeros(env.single_observation_space.shape)
-    dummy_action = jnp.zeros(act_dim)
-    network = UNet(args, obs_dim, act_dim)
-
-    agent_state = create_train_state(args, rng, )
 
