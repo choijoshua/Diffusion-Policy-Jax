@@ -9,7 +9,7 @@ parent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, parent_dir)
 
 from config import TrainArgs
-from model.util import cosine_beta_schedule
+from model.utils import cosine_beta_schedule
 from flax.training.train_state import TrainState
 
 
@@ -70,7 +70,7 @@ class DDPMPolicy:
         '''
         assert noise.shape == xt.shape
         mean, var = self.p_mean_variance(xt, t, epsilon_pred)
-        return mean + var * noise
+        return mean + var[:, None, None] * noise
     
     def forward_sample(self, x0, t, noise):
         """ 
@@ -81,22 +81,40 @@ class DDPMPolicy:
     
     def sample(self, rng, train_state, xt, obs):
         params = train_state.params
-        for t in reversed(range(self.timesteps)):
+        for t in reversed(range(1, self.timesteps)):
             rng, epsilon_rng = jax.random.split(rng)
-            epsilon = self.model_apply_fn(params, xt, t, obs)
+            t = jnp.full((xt.shape[0],), t)
+            epsilon = self.predict(params, xt, t, obs)
             noise = jax.random.normal(key=epsilon_rng, shape=xt.shape)
-            if t == 0:
-                noise = jnp.zeros_like(xt)
             xt = self.p_sample(xt, t, epsilon, noise)
         
+        t = jnp.full((xt.shape[0],), 0)
+        noise = jnp.zeros_like(xt)
+        xt = self.p_sample(xt, t, epsilon, noise)
         return xt
     
     def predict(self, params, x, t, obs):
         return self.model_apply_fn(params, x, t, obs)
     
     def get_action(self, rng, train_state, obs):
+        if obs.ndim == 1:
+            obs = obs[None, :]  # (obs_dim,) -> (1, obs_dim)
+            single_obs = True
+        else:
+            single_obs = False
+
         rng, rng_sample = jax.random.split(rng)
-        xt = jax.random.normal(rng_sample, shape=(self.args.batch_size, self.args.horizon, self.action_dim))
+        batch_size = obs.shape[0]
+        # Start from noise
+        xt = jax.random.normal(
+            rng_sample, 
+            shape=(batch_size, self.args.horizon, self.action_dim)
+        )
         trajectory_pred = self.sample(rng, train_state, xt, obs)
-        return trajectory_pred[:, 0, :]
+        
+        action =  trajectory_pred[:, 0, :]
+        if single_obs:
+            return action[0]  # Return single action
+        
+        return action
     
