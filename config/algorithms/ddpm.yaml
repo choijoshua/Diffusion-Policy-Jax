@@ -6,12 +6,12 @@ num_updates: 10000
 eval_interval: 1000
 eval_workers: 8
 batch_size: 64
-lr: 3e-4
+lr: 1e-4
 
 # Diffusion Parameters
-num_timesteps: 50
+num_timesteps: 100
 mode: trajectory
-horizon: 32
+horizon: 8
 max_traj_len: 1000
 max_n_traj: 1000
 

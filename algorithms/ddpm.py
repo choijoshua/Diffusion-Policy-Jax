@@ -81,16 +81,30 @@ class DDPMPolicy:
     
     def sample(self, rng, train_state, xt, obs):
         params = train_state.params
-        for t in reversed(range(1, self.timesteps)):
-            rng, epsilon_rng = jax.random.split(rng)
-            t = jnp.full((xt.shape[0],), t)
-            epsilon = self.predict(params, xt, t, obs)
-            noise = jax.random.normal(key=epsilon_rng, shape=xt.shape)
-            xt = self.p_sample(xt, t, epsilon, noise)
         
-        t = jnp.full((xt.shape[0],), 0)
-        noise = jnp.zeros_like(xt)
-        xt = self.p_sample(xt, t, epsilon, noise)
+        def body_fn(t_reversed, carry):
+            rng, xt = carry
+            
+            # Convert reversed index to actual timestep
+            t_int = self.timesteps - 1 - t_reversed  # timesteps-1, timesteps-2, ..., 1
+            
+            rng, epsilon_rng = jax.random.split(rng)
+            t_array = jnp.full((xt.shape[0],), t_int)
+            
+            epsilon = self.predict(params, xt, t_array, obs)
+            noise = jax.random.normal(key=epsilon_rng, shape=xt.shape)
+            xt = self.p_sample(xt, t_array, epsilon, noise)
+            
+            return (rng, xt)
+        
+        # Loop from t=timesteps-1 down to t=1
+        rng, xt = jax.lax.fori_loop(0, self.timesteps - 1, body_fn, (rng, xt))
+        
+        # Final step t=0 without noise
+        t_zero = jnp.full((xt.shape[0],), 0)
+        epsilon = self.predict(params, xt, t_zero, obs)  # Recompute epsilon
+        xt = self.p_sample(xt, t_zero, epsilon, jnp.zeros_like(xt))
+        
         return xt
     
     def predict(self, params, x, t, obs):

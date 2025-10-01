@@ -219,10 +219,12 @@ def main(cfg: GeneralArgs) -> None:
     policy_train_state = create_train_state(train_args, init_rng, unet, [x, t, obs], train_args.num_updates)
 
     if train_args.algorithm == "ddpm":
+        print("\nInitializing DDPM Policy...")
         policy = DDPMPolicy(
             train_args, action_dim, policy_train_state.apply_fn
         )
     elif train_args.algorithm == "score_matching":
+        print("\nInitializing Score Matching Policy...")
         policy = ScoreMatchingPolicy(
             train_args, action_dim, policy_train_state.apply_fn
         )
