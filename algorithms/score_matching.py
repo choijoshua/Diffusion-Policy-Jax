@@ -9,15 +9,14 @@ parent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, parent_dir)
 
 from config import TrainArgs
-from flax.training.train_state import TrainState
 
 
 class ScoreMatchingPolicy:
-    def __init__(self, args: TrainArgs, model: TrainState, action_dim: int):
+    def __init__(self, args: TrainArgs, action_dim: int, model_apply_fn=None):
         self.args = args
         self.timesteps = args.timesteps
-        self.model = model
         self.action_dim = action_dim
+        self.model_apply_fn = model_apply_fn
         
     def sde_gt(self, t):
         '''
@@ -124,7 +123,7 @@ class ScoreMatchingPolicy:
         """
         return self.forward_sde_sample(x0, t, noise)
     
-    def sample(self, rng, xt, obs):
+    def sample(self, rng, train_state, xt, obs):
         ''' Sample from target distribution based on which sampler to use
         
         Sampler Options:
@@ -134,7 +133,7 @@ class ScoreMatchingPolicy:
         Return: sample from target distribution p(x)
         
         '''
-        params = self.model.params
+        params = train_state.params
         if self.args.sampler == "euler_maruyama":
             x_0 = self.euler_maruyama_sampler(rng, xt, obs, params, self.timesteps, self.args.eps)
         elif self.args.sampler == "predictor_corrector":
@@ -145,11 +144,11 @@ class ScoreMatchingPolicy:
         return x_0
     
     def predict(self, params, x, t, obs):
-        return self.model.apply_fn(params, x, t, obs)
+        return self.model_apply_fn(params, x, t, obs)
     
-    def get_action(self, rng, obs):
+    def get_action(self, rng, train_state, obs):
         rng, rng_sample = jax.random.split(rng)
         xt = jax.random.normal(rng_sample, shape=(self.args.batch_size, self.args.horizon, self.action_dim))
-        trajectory_pred = self.sample(xt, rng, obs)
+        trajectory_pred = self.sample(rng, train_state, xt, obs)
         return trajectory_pred[:, 0, :]
 

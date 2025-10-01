@@ -14,14 +14,14 @@ from flax.training.train_state import TrainState
 
 
 class DDPMPolicy:
-    def __init__(self, args: TrainArgs, model: TrainState, action_dim: int):
+    def __init__(self, args: TrainArgs, action_dim: int, model_apply_fn=None):
         self.args = args
-        self.model = model
         self.timesteps = self.args.num_timesteps
         self.action_dim = action_dim
         self.beta = cosine_beta_schedule(timesteps=self.timesteps)
         self.alpha = 1 - self.beta
         self.alpha_bar = jnp.cumprod(self.alpha)
+        self.model_apply_fn = model_apply_fn
         
     def q_mean_variance(self, x0, t):
         '''
@@ -66,11 +66,11 @@ class DDPMPolicy:
         """
         return self.q_sample(x0, t, noise)
     
-    def sample(self, rng, xt, agent_state, obs):
-        params = agent_state.params
+    def sample(self, rng, train_state, xt, obs):
+        params = train_state.params
         for t in reversed(range(self.timesteps)):
             rng, epsilon_rng = jax.random.split(rng)
-            epsilon = self.model.apply_fn(params, xt, t, obs)
+            epsilon = self.model_apply_fn(params, xt, t, obs)
             noise = jax.random.normal(key=epsilon_rng, shape=xt.shape)
             if t == 0:
                 noise = jnp.zeros_like(xt)
@@ -78,12 +78,12 @@ class DDPMPolicy:
         
         return xt
     
-    def predict(self, params, xt, t, obs):
-        return self.model.apply_fn(params, xt, t, obs)
+    def predict(self, params, x, t, obs):
+        return self.model_apply_fn(params, x, t, obs)
     
-    def get_action(self, rng, obs):
+    def get_action(self, rng, train_state, obs):
         rng, rng_sample = jax.random.split(rng)
         xt = jax.random.normal(rng_sample, shape=(self.args.batch_size, self.args.horizon, self.action_dim))
-        trajectory_pred = self.sample(xt, rng, obs)
+        trajectory_pred = self.sample(rng, train_state, xt, obs)
         return trajectory_pred[:, 0, :]
     
