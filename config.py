@@ -11,7 +11,7 @@ class TrainArgs:
     num_updates: int = 100000
     
     num_timesteps: int = 50
-    
+    mode: str = "trajectory"
 
 @dataclass
 class DDPMArgs(TrainArgs):
@@ -21,6 +21,8 @@ class DDPMArgs(TrainArgs):
 class ScoreMatchingArgs(TrainArgs):
     algorithm = "score_matching"
     sigma: float = 3.0
+    eps: float = 1e-5
+    sampler: str = "euler_maruyama" # euler_maruyama, predictor_corrector
 
 
 @dataclass
@@ -34,7 +36,6 @@ class GeneralArgs:
     log: bool = False
     save_ckpt: bool = False
     wandb_project: str = "unifloral"
-    wandb_team: str = "flair"
     wandb_group: str = "debug"
     wandb_jobtype: str = "Train"
 

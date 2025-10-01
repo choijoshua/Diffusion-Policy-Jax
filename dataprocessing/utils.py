@@ -8,11 +8,12 @@ import gymnasium as gym
 from gymnasium.vector import SyncVectorEnv
 import pickle
 from dataprocessing.d4rl_wrapper import ClassicGymToGymnasium
-Transition = namedtuple("Transition", "obs action reward next_obs next_action done traj_return label")
+
+Transition = namedtuple("Transition", "obs action reward next_obs next_action done traj_return")
 FLAGS = flags.FLAGS
 
 
-def split_into_trajectories(dataset, gamma):
+def split_into_trajectories(dataset):
     # 1) Pull everything out as NumPy once
     obs_np         = onp.array(dataset.obs)
     action_np      = onp.array(dataset.action)
@@ -20,30 +21,11 @@ def split_into_trajectories(dataset, gamma):
     next_obs_np    = onp.array(dataset.next_obs)
     next_action_np = onp.array(dataset.next_action)
     done_np        = onp.array(dataset.done).astype(bool)
-    label_np       = onp.array(dataset.label)
+    rtg_np         = onp.array(dataset.traj_return)
 
     # 2) Compute a flat return‐to‐go array of length N
     N = reward_np.shape[0]
-    returns_np = onp.zeros_like(reward_np)
     done_idxs  = onp.nonzero(done_np)[0].tolist()
-
-    start = 0
-    for end in done_idxs:
-        r_seg = reward_np[start:end+1]          # shape (T_i,)
-
-        # method A: explicit vectorized
-        T_i      = r_seg.shape[0]
-        discounts = gamma**onp.arange(T_i)       # [1, γ, γ^2, … γ^(T_i-1)]
-        # for each t, G_t = sum_{j=t..T_i-1} γ^(j-t) · r_seg[j]
-        #          = ( discounts[:T_i-t] * r_seg[t:] ).sum()
-        # we can build a toeplitz‐like operation, but simplest is:
-        ret_seg = onp.array([
-            onp.dot(discounts[:T_i - t], r_seg[t:]) 
-            for t in range(T_i)
-        ])
-
-        returns_np[start:end+1] = ret_seg
-        start = end + 1
 
     # 3) Build the per-episode list
     dataset_traj = []
@@ -56,8 +38,7 @@ def split_into_trajectories(dataset, gamma):
         no  = next_obs_np   [start:end+1]
         na  = next_action_np[start:end+1]
         d   = done_np       [start:end+1]
-        lb  = label_np      [start:end+1]
-        rtg = returns_np    [start:end+1]
+        rtg = rtg_np        [start:end+1]
 
         dataset_traj.append(
             Transition(
@@ -67,8 +48,7 @@ def split_into_trajectories(dataset, gamma):
                 next_obs    = jnp.array(no),
                 next_action = jnp.array(na),
                 done        = jnp.array(d),
-                traj_return = jnp.array(rtg),
-                label       = jnp.array(lb),
+                traj_return = jnp.array(rtg)
             )
         )
         start = end + 1
@@ -81,8 +61,7 @@ def split_into_trajectories(dataset, gamma):
         no  = next_obs_np   [start:N]
         na  = next_action_np[start:N]
         d   = done_np       [start:N]
-        lb  = label_np      [start:N]
-        rtg = returns_np    [start:N]
+        rtg = rtg_np        [start:N]
 
         dataset_traj.append(
             Transition(
@@ -92,8 +71,7 @@ def split_into_trajectories(dataset, gamma):
                 next_obs    = jnp.array(no),
                 next_action = jnp.array(na),
                 done        = jnp.array(d),
-                traj_return = jnp.array(rtg),
-                label       = jnp.array(lb),
+                traj_return = jnp.array(rtg)
             )
         )
 
@@ -265,7 +243,6 @@ def build_transition_from_raw(raw, gamma: float) -> Transition:
     _, G_rev = jax.lax.scan(rtg_scan, jnp.array(0.0, dtype=jnp.float32), (rewards[::-1], dones_f[::-1]))
     traj_return = G_rev[::-1]
 
-    labels = jnp.zeros((obs.shape[0],), dtype=jnp.uint8)
 
     return Transition(
         obs=obs,
@@ -274,6 +251,5 @@ def build_transition_from_raw(raw, gamma: float) -> Transition:
         next_obs=next_obs,
         next_action=next_action,
         done=dones,
-        traj_return=traj_return,
-        label=labels,
+        traj_return=traj_return
     )
