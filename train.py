@@ -101,7 +101,7 @@ def make_train_step(args, dataset, policy):
         metrics = {'loss': loss}
         return new_runner_state, metrics
     
-    return _train_step
+    return jax.jit(_train_step)
 
 def evaluate_policy_returns(
     cfg, 
@@ -133,7 +133,7 @@ def evaluate_policy_returns(
     @jax.jit
     @jax.vmap
     def _policy_step(rng, obs):
-        action = policy.get_action(rng, obs)
+        action = policy.get_action(rng, train_state, obs)
         return jnp.nan_to_num(action)
 
     while step < max_episode_steps and not returned.all():
@@ -239,24 +239,25 @@ def main(cfg: GeneralArgs) -> None:
     num_evals = train_args.num_updates // train_args.eval_interval
     for eval_idx in tqdm(range(num_evals), desc="Training"):
         # --- Execute train loop ---
-        # (rng, policy_train_state), loss = jax.lax.scan(
-        #     _agent_train_step_fn,
-        #     (rng, policy_train_state),
-        #     None,
-        #     train_args.eval_interval,
-        # )
-        for i in range(train_args.eval_interval):
-            (rng, policy_train_state), loss = _agent_train_step_fn((rng, policy_train_state), i)
+        (rng, policy_train_state), loss = jax.lax.scan(
+            _agent_train_step_fn,
+            (rng, policy_train_state),
+            None,
+            train_args.eval_interval,
+        )
+        # for i in range(train_args.eval_interval):
+        #     (rng, policy_train_state), loss = _agent_train_step_fn((rng, policy_train_state), i)
 
         # --- Evaluate agent ---
         rng, rng_eval = jax.random.split(rng)
-        scores, std = evaluate_policy_returns(cfg, rng_eval, env, policy, env_meta)
+        scores, std = evaluate_policy_returns(cfg, rng_eval, env, policy, policy_train_state, env_meta)
         step = (eval_idx + 1) * train_args.eval_interval
         print("Step:", step, f"\t Score: {scores.mean():.2f}")
         if cfg.log:
             log_dict = {
                 "score": scores.mean(),
-                "score_std": scores.std(),
+                "score_std": std.mean(),
+                **{k: loss[k][-1] for k in loss}
             }
             wandb.log(log_dict)
 

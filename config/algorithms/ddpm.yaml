@@ -2,9 +2,9 @@
 algorithm: ddpm
 
 # training parameters
-num_updates: 100000
+num_updates: 10000
 eval_interval: 1000
-eval_workers: 10
+eval_workers: 8
 batch_size: 64
 lr: 3e-4
 

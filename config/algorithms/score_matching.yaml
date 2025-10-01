@@ -2,8 +2,8 @@
 algorithm: score_matching
 
 # training parameters
-num_updates: 100000
-eval_interval: 1000
+num_updates: 1000
+eval_interval: 10
 eval_workers: 10
 batch_size: 64
 lr: 3e-4
