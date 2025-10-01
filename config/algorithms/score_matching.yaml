@@ -5,16 +5,16 @@ algorithm: score_matching
 num_updates: 100000
 eval_interval: 1000
 eval_workers: 10
-batch_size: 256
+batch_size: 64
 lr: 3e-4
 
 # Diffusion Parameters
-num_timesteps: 100
+num_timesteps: 50
 sigma: 3
 mode: trajectory
 eps: 1e-5
 sampler: euler_maruyama # euler_maruyama, predictor_corrector
-horizon: 64
+horizon: 32
 max_traj_len: 1000
 max_n_traj: 1000
 

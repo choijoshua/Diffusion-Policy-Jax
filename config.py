@@ -10,6 +10,10 @@ class TrainArgs:
     algorithm: str = MISSING
     lr: float = 3e-4
     num_updates: int = 100000
+    eval_interval: int = 1000
+    eval_workers: int = 10
+    batch_size: int = 128
+    gamma: float = 0.99
     
     num_timesteps: int = 50
     mode: str = "trajectory"
@@ -19,7 +23,7 @@ class TrainArgs:
 
     # Model Parameters
     embed_dim: int = 256
-    dims: Sequence[int] = (128, 256, 512)
+    dims: tuple = (128, 256, 512)
 
 @dataclass
 class DDPMArgs(TrainArgs):
