@@ -8,3 +8,6 @@ lr: 3e-4
 
 num_timesteps: 100
 sigma: 3
+mode: trajectory
+eps: 1e-5
+sampler: euler_maruyama # euler_maruyama, predictor_corrector

@@ -7,3 +7,4 @@ batch_size: 256
 lr: 3e-4
 
 num_timesteps: 100
+mode: trajectory
