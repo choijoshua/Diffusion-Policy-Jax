@@ -13,10 +13,11 @@ from flax.training.train_state import TrainState
 
 
 class ScoreMatchingPolicy:
-    def __init__(self, args: TrainArgs, model: TrainState):
+    def __init__(self, args: TrainArgs, model: TrainState, action_dim: int):
         self.args = args
         self.timesteps = args.timesteps
         self.model = model
+        self.action_dim = action_dim
         
     def sde_gt(self, t):
         '''
@@ -30,7 +31,7 @@ class ScoreMatchingPolicy:
         SDE in the form of: dx = f(x, t) dt + g(t) dw
         x(t) = x(0) + integral [0, t] g(t)^2 dw
         '''
-        
+
         return jnp.sqrt((self.args.sigma**(2 * t) - 1.) / 2. / jnp.log(self.args.sigma))
         
     def forward_sde_sample(self, x0, t, noise):
@@ -123,7 +124,7 @@ class ScoreMatchingPolicy:
         """
         return self.forward_sde_sample(x0, t, noise)
     
-    def sample(self, rng, xt, agent_state, obs):
+    def sample(self, rng, xt, obs):
         ''' Sample from target distribution based on which sampler to use
         
         Sampler Options:
@@ -133,7 +134,7 @@ class ScoreMatchingPolicy:
         Return: sample from target distribution p(x)
         
         '''
-        params = agent_state.params
+        params = self.model.params
         if self.args.sampler == "euler_maruyama":
             x_0 = self.euler_maruyama_sampler(rng, xt, obs, params, self.timesteps, self.args.eps)
         elif self.args.sampler == "predictor_corrector":
@@ -146,7 +147,9 @@ class ScoreMatchingPolicy:
     def predict(self, params, x, t, obs):
         return self.model.apply_fn(params, x, t, obs)
     
-    def get_action(self, rng, xt, agent_state, obs):
-        trajectory_pred = self.sample(xt, rng, agent_state, obs)
+    def get_action(self, rng, obs):
+        rng, rng_sample = jax.random.split(rng)
+        xt = jax.random.normal(rng_sample, shape=(self.args.batch_size, self.args.horizon, self.action_dim))
+        trajectory_pred = self.sample(xt, rng, obs)
         return trajectory_pred[:, 0, :]
 

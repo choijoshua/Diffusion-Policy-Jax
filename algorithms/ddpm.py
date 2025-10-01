@@ -14,10 +14,11 @@ from flax.training.train_state import TrainState
 
 
 class DDPMPolicy:
-    def __init__(self, args: TrainArgs, model: TrainState):
+    def __init__(self, args: TrainArgs, model: TrainState, action_dim: int):
         self.args = args
         self.model = model
         self.timesteps = self.args.num_timesteps
+        self.action_dim = action_dim
         self.beta = cosine_beta_schedule(timesteps=self.timesteps)
         self.alpha = 1 - self.beta
         self.alpha_bar = jnp.cumprod(self.alpha)
@@ -80,7 +81,9 @@ class DDPMPolicy:
     def predict(self, params, xt, t, obs):
         return self.model.apply_fn(params, xt, t, obs)
     
-    def get_action(self, rng, xt, agent_state, obs):
-        trajectory_pred = self.sample(xt, rng, agent_state, obs)
+    def get_action(self, rng, obs):
+        rng, rng_sample = jax.random.split(rng)
+        xt = jax.random.normal(rng_sample, shape=(self.args.batch_size, self.args.horizon, self.action_dim))
+        trajectory_pred = self.sample(xt, rng, obs)
         return trajectory_pred[:, 0, :]
     
