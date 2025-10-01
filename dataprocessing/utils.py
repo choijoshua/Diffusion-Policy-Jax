@@ -190,8 +190,6 @@ def make_env_and_dataset(args, num_envs):
             next_observations=ds["next_observations"],
             dones=ds["terminals"],  # treat terminals as dones; timeouts handled in preprocess
         )
-        if args.use_labelled_dataset:
-            raw["labels"] = ds["labels"]
         env_meta = dict(kind="d4rl", make_single_unwrapped=make_single_classic)
         return env, raw, env_meta
     except Exception as d4_err:

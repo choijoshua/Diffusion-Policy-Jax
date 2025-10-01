@@ -103,7 +103,7 @@ class TrajDataset:
             rng, ep_rng, segment_rng = jax.random.split(rng, 3)
             
             # Pick an episode uniformly using JAX random
-            ep_idx = int(jax.random.randint(ep_rng, (), 0, len(self.ends)))
+            ep_idx = jax.random.randint(ep_rng, (), 0, len(self.ends))
             ep_start = self.starts[ep_idx]
             ep_end = self.ends[ep_idx]
             
@@ -112,7 +112,7 @@ class TrajDataset:
             
             if ep_length >= self.horizon:
                 # Sample uniformly from valid range using JAX random
-                end = int(jax.random.randint(segment_rng, (), ep_start + self.horizon, ep_end + 1))
+                end = jax.random.randint(segment_rng, (), ep_start + self.horizon, ep_end + 1)
                 start = end - self.horizon
                 pad = 0
             else:

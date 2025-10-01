@@ -4,9 +4,8 @@ defaults:
 seed: 1
 # --- Dataset --- 
 dataset: hopper-expert-v2
-use_labelled_dataset: False
 # --- Logging ---
-log: True
+log: False
 save_ckpt: False
 wandb_project: DiffusionPolicy
 wandb_group: debug
