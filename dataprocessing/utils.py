@@ -1,4 +1,5 @@
 from absl import flags
+from collections.abc import Mapping
 from collections import namedtuple
 import numpy as onp
 import jax.numpy as jnp
@@ -119,7 +120,7 @@ def d4rl_dataset_preprocess(dataset):
     # build our own “timeout” mask
     timeouts = onp.zeros_like(terms)
     ctr = 0
-    max_length = 1000
+    max_length = 200
     for i in range(N):
         if terms[i]:
             # real termination → reset counter
@@ -137,13 +138,157 @@ def d4rl_dataset_preprocess(dataset):
 
     return jax.tree_util.tree_map(lambda *arrays: jnp.concatenate(arrays, axis=0), *dataset_traj_list)
 
+def concatenate_batches(batches):
+    concatenated = {}
+    for key in batches[0].keys():
+        if isinstance(batches[0][key], Mapping):
+            # to concatenate batch["observations"]["image"], etc.
+            concatenated[key] = concatenate_batches([batch[key] for batch in batches])
+        else:
+            concatenated[key] = onp.concatenate(
+                [batch[key] for batch in batches], axis=0
+            ).astype(onp.float32)
+    return concatenated
+
+def _determine_whether_sparse_reward(env_name):
+    # return True if the environment is sparse-reward
+    # determine if the env is sparse-reward or not
+    if "antmaze" in env_name or env_name in [
+        "pen-binary-v0",
+        "door-binary-v0",
+        "relocate-binary-v0",
+        "pen-binary",
+        "door-binary",
+        "relocate-binary",
+    ]:
+        is_sparse_reward = True
+    elif (
+        "halfcheetah" in env_name
+        or "hopper" in env_name
+        or "walker" in env_name
+        or "kitchen" in env_name
+    ):
+        is_sparse_reward = False
+    elif "toy" in env_name:
+        is_sparse_reward=False
+    elif env_name == 'ToyDot':
+        is_sparse_reward = False
+    else:   
+        print(env_name)
+        raise NotImplementedError
+
+    return is_sparse_reward
+
+
+# used to calculate the MC return for sparse-reward tasks.
+# Assumes that the environment issues two reward values: reward_pos when the
+# task is completed, and reward_neg at all the other steps.
+ENV_REWARD_INFO = {
+    "antmaze": {  # antmaze default is 0/1 reward
+        "reward_pos": 1.0,
+        "reward_neg": 0.0,
+    },
+    "adroit-binary": {  # adroit default is -1/0 reward
+        "reward_pos": 0.0,
+        "reward_neg": -1.0,
+    },
+}
+
+
+def _get_negative_reward(env_name, reward_scale, reward_bias):
+    """
+    Given an environment with sparse rewards (aka there's only two reward values,
+    the goal reward when the task is done, or the step penalty otherwise).
+    Args:
+        env_name: the name of the environment
+        reward_scale: the reward scale
+        reward_bias: the reward bias. The reward_scale and reward_bias are not applied
+            here to scale the reward, but to determine the correct negative reward value.
+
+    NOTE: this function should only be called on sparse-reward environments
+    """
+    if "antmaze" in env_name:
+        reward_neg = (
+            ENV_REWARD_INFO["antmaze"]["reward_neg"] * reward_scale + reward_bias
+        )
+    elif env_name in [
+        "pen-binary-v0",
+        "door-binary-v0",
+        "relocate-binary-v0",
+    ]:
+        reward_neg = (
+            ENV_REWARD_INFO["adroit-binary"]["reward_neg"] * reward_scale + reward_bias
+        )
+    else:
+        raise NotImplementedError(
+            """
+            If you want to try on a sparse reward env,
+            please add the reward_neg value in the ENV_REWARD_INFO dict.
+        """
+        )
+
+    return reward_neg
+
+def calc_return_to_go(
+    env_name,
+    rewards,
+    masks,
+    gamma,
+    reward_scale=None,
+    reward_bias=None,
+    infinite_horizon=False,
+):
+    """
+    Calculat the Monte Carlo return to go given a list of reward for a single trajectory.
+    Args:
+        env_name: the name of the environment
+        rewards: a list of rewards
+        masks: a list of done masks
+        gamma: the discount factor used to discount rewards
+        reward_scale, reward_bias: the reward scale and bias used to determine
+            the negative reward value for sparse-reward environments. If None,
+            default from FLAGS values. Leave None unless for special cases.
+        infinite_horizon: whether the MDP has inifite horizion (and therefore infinite return to go)
+    """
+    if len(rewards) == 0:
+        return onp.array([])
+
+    # process sparse-reward envs
+    if reward_scale is None or reward_bias is None:
+        # scale and bias not applied, but used to determien the negative reward value
+        assert reward_scale is None and reward_bias is None  # both should be unset
+        reward_scale = FLAGS.reward_scale
+        reward_bias = FLAGS.reward_bias
+    # is_sparse_reward = _determine_whether_sparse_reward(env_name)
+    is_sparse_reward = False
+    if is_sparse_reward:
+        reward_neg = _get_negative_reward(env_name, reward_scale, reward_bias)
+
+    if is_sparse_reward and onp.all(onp.array(rewards) == reward_neg):
+        """
+        If the env has sparse reward and the trajectory is all negative rewards,
+        we use r / (1-gamma) as return to go.
+        For exapmle, if gamma = 0.99 and the rewards = [-1, -1, -1],
+        then return_to_go = [-100, -100, -100]
+        """
+        return_to_go = [float(reward_neg / (1 - gamma))] * len(rewards)
+    else:
+        # sum up the rewards backwards as the return to go
+        return_to_go = [0] * len(rewards)
+        prev_return = 0 if not infinite_horizon else float(rewards[-1] / (1 - gamma))
+        for i in range(len(rewards)):
+            return_to_go[-i - 1] = rewards[-i - 1] + gamma * prev_return * (
+                masks[-i - 1]
+            )
+            prev_return = return_to_go[-i - 1]
+    return onp.array(return_to_go, dtype=onp.float32)
+
 def make_env_and_dataset(args, num_envs):
     # --- Initialize environment and dataset ---
-
     # Try OGBench first
     try:
         import ogbench
-        from ogbench_dataset import get_ogbench_with_mc_calculation, get_ogbench_dataset
+        from dataprocessing.ogbench_dataset import get_ogbench_with_mc_calculation
         if args.custom_dataset is not None:
             with open(args.custom_dataset, "rb") as f:
                 raw_dataset = pickle.load(f)

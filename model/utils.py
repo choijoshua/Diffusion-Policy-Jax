@@ -23,7 +23,7 @@ def cosine_beta_schedule(timesteps, s=0.008, dtype=jnp.float32):
     alphas_cumprod = jnp.cos(((x / steps) + s) / (1 + s) * jnp.pi * 0.5) ** 2
     alphas_cumprod = alphas_cumprod / alphas_cumprod[0]
     betas = 1 - (alphas_cumprod[1:] / alphas_cumprod[:-1])
-    betas_clipped = jnp.clip(betas, min=0, max=0.999)
+    betas_clipped = jnp.clip(betas, a_min=0, a_max=0.999)
     return jnp.array(betas_clipped, dtype=dtype)
     
 
