@@ -82,7 +82,7 @@ def make_train_step(args, dataset, policy):
             t = jax.random.randint(t_rng, (args.batch_size,), 0, args.num_timesteps)
             loss_fn = ddpm_loss_fn
         elif args.algorithm == "score_matching":
-            t = jax.random.uniform(t_rng, (args.batch_size,), args.eps, 1.0)
+            t = jax.random.uniform(t_rng, (args.batch_size,), minval=float(args.eps), maxval=1.0, dtype=jnp.float32)
             loss_fn = score_matching_loss_fn
         else:
             print("CHOOSE AN ALGORITHM TO USE (DDPM, SCOREMATCHING)")

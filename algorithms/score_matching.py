@@ -14,7 +14,7 @@ from config import TrainArgs
 class ScoreMatchingPolicy:
     def __init__(self, args: TrainArgs, action_dim: int, model_apply_fn=None):
         self.args = args
-        self.timesteps = args.timesteps
+        self.timesteps = args.num_timesteps
         self.action_dim = action_dim
         self.model_apply_fn = model_apply_fn
         
@@ -61,7 +61,7 @@ class ScoreMatchingPolicy:
         time_steps = jnp.linspace(1., eps, num_steps)
         step_size = time_steps[0] - time_steps[1]
         for time_step in time_steps:
-            batch_time_step = jnp.ones(self.args.batch_size) * time_step
+            batch_time_step = jnp.full((x.shape[0],), time_step)
             g = self.sde_gt(time_step)
             mean_x = x + (g**2) * self.predict(params, x, batch_time_step, obs) * step_size
             rng, step_rng = jax.random.split(rng)
@@ -69,7 +69,7 @@ class ScoreMatchingPolicy:
         # Do not include any noise in the last sampling step.
         return mean_x
     
-    def predictor_corrector_sampler(self, rng, init_x, obs, params, num_steps, eps=1e-5, snr=0.16):
+    def predictor_corrector_sampler(self, rng, init_x, obs, params, num_steps, eps=1e-4, snr=0.16):
         '''Generate samples from score-based models with the Predictor Corrector solver.
 
         Args:
@@ -93,7 +93,7 @@ class ScoreMatchingPolicy:
         x = init_x  
         
         for time_step in time_steps:  # Fixed: iterate over array, not range()
-            batch_time_step = jnp.ones(self.args.batch_size) * time_step
+            batch_time_step = jnp.full((x.shape[0],), time_step)
             
             # Corrector step (Langevin MCMC)
             grad = self.predict(params, x, batch_time_step, obs)    
@@ -147,8 +147,25 @@ class ScoreMatchingPolicy:
         return self.model_apply_fn(params, x, t, obs)
     
     def get_action(self, rng, train_state, obs):
+        if obs.ndim == 1:
+            obs = obs[None, :]  # (obs_dim,) -> (1, obs_dim)
+            single_obs = True
+        else:
+            single_obs = False
+
         rng, rng_sample = jax.random.split(rng)
-        xt = jax.random.normal(rng_sample, shape=(self.args.batch_size, self.args.horizon, self.action_dim))
+        batch_size = obs.shape[0]
+        # Start from noise
+        xt = jax.random.normal(
+            rng_sample, 
+            shape=(batch_size, self.args.horizon, self.action_dim)
+        )
         trajectory_pred = self.sample(rng, train_state, xt, obs)
-        return trajectory_pred[:, 0, :]
+        
+        action =  trajectory_pred[:, 0, :]
+        if single_obs:
+            return action[0]  # Return single action
+        
+        return action
+    
 
