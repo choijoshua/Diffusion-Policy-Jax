@@ -30,7 +30,7 @@ class QuadParams:
     mass: float = 1.0
     gravity: np.ndarray = field(default_factory=lambda: np.array([0.0, 0.0, -9.81]))
     min_thrust: float = 0.0
-    max_thrust: float = 7.5
+    max_thrust: float = 12.5
     max_vel: float = 10
     max_omega: float = 15
     dt: float = 0.01
@@ -39,6 +39,19 @@ class QuadParams:
     back_motor_position: np.ndarray = field(default_factory=lambda: np.array([0.075, 0.1]))
     J: np.ndarray = field(default_factory=lambda: np.eye(3) * 0.001)
 
+class QuadState:
+    def __init__(self, position, orientation, velocity, body_rate):
+        self.position = position
+        self.orientation = orientation
+        self.velocity = velocity
+        self.body_rate = body_rate
+    
+    def update_state(self, position, orientation, velocity, body_rate):
+        self.position = position
+        self.orientation = orientation
+        self.velocity = velocity
+        self.body_rate = body_rate
+        
 class QuadrotorDynamics():
     
     def __init__(self):
@@ -102,10 +115,14 @@ class QuadrotorDynamics():
         else:
             raise ValueError("Motor layout not supported")
         
-    def run(self, state, motor_thrust, horizon):
+    def run(self, quad_state, motor_thrust, horizon):
         
         # defensive copies / types
-        state = np.asarray(state, dtype=float)
+        state = np.hstack([quad_state.position,
+                           quad_state.orientation,
+                           quad_state.velocity,
+                           quad_state.body_rate])
+        
         u = np.asarray(motor_thrust, dtype=float)
         u = np.clip(u, self.min_thrust, self.max_thrust)
 
@@ -119,7 +136,11 @@ class QuadrotorDynamics():
             state = self.rk4_integrate_step(state, u, dt)
             remaining -= dt
 
-        return state
+        quad_state.position = state[:3]
+        quad_state.orientation = state[3:7]
+        quad_state.velocity = state[7:10]
+        quad_state.body_rate = state[10:]
+        return quad_state
 
     def rk4_integrate_step(self, state, motor_thrust, dt):
 
